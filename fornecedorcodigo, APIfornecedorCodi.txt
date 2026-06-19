@@ -1,0 +1,12 @@
+  fornecedorcodigo, API:fornecedorCodigo
+  numerotitulo,	API:numeroTitulo
+  descricao,	API:descricao
+  valor,	API:valorParcela
+  parcela,	API:numeroParcelas
+  datamovimento,API:dataMovimento
+  vencimento,	API:vencimento
+  planocontagerencialcodigo,	API:planoContaCodigo
+  centrocustocodigo,	API:centroCustoCodigo
+  observacao,	API:observacao
+  isdatavalida,	API:true
+
