@@ -100,7 +100,11 @@ MAPEAMENTO_TITULOS_POST = {
     "observacao": "observacao",
     "isDataValida": "isDataValida",
 }
-
+ALIAS_COLUNAS: dict[str, dict[str, str]] = {
+    "centro_custo_dest":  {"codigo": "centrocustocodigo_antigo"},
+    "plano_conta_dest":   {"codigo": "planocontacodigo_antigo"},
+    "fornecedor_dest":    {"codigo": "fornecedorcodigo_antigo"},
+}
 TABELAS_ORIGEM: dict[str, str] = {
     "CENTRO_CUSTO":          "centro_custo_ori",
     "PLANO_CONTA_GERENCIAL": "plano_conta_ori",
@@ -202,19 +206,14 @@ def obter_colunas_reais(conn, tabela: str) -> dict[str, str]:
 
 def mapear_colunas(conn, tabela: str, colunas_api: list[str],
                    log_fn=None) -> list[tuple[str, str]]:
-    """
-    Para cada coluna esperada da API, encontra o nome real no banco
-    via comparação case-insensitive.
-
-    Retorna lista de tuplas: (nome_api, nome_banco_real)
-    Colunas não encontradas no banco são omitidas com aviso no log.
-    """
     _log = log_fn or log.info
     reais = obter_colunas_reais(conn, tabela)
+    aliases = ALIAS_COLUNAS.get(tabela, {})  # ← alias por tabela
 
     mapeamento = []
     for col_api in colunas_api:
-        col_banco = reais.get(col_api.lower())
+        col_lookup = aliases.get(col_api, col_api)  # aplica alias se existir
+        col_banco = reais.get(col_lookup.lower())
         if col_banco:
             mapeamento.append((col_api, col_banco))
         else:
@@ -457,7 +456,32 @@ class TelaConexao:
 # ==========================================================
 
 class TelaPrincipal:
-    """Tela principal: token, flag, execução e progresso."""
+    """Tela principal: token, flag, execução e progresso — fluxo em 2 fases."""
+
+    _FASES = [
+        {
+            "fase":        1,
+            "flag":        "GET_ORIGEM",
+            "mapa":        "TABELAS_ORIGEM",   # resolvido em _iniciar_thread
+            "titulo":      "Importação — Filial de Origem  (1 / 2)",
+            "badge":       "▶  Fase 1 de 2  —  GET_ORIGEM",
+            "label_token": "Token API — Filial de Origem:",
+            "btn_text":    "Importar Origem",
+            "msg_inicio":  "🔄  Iniciando importação da filial de ORIGEM…",
+            "msg_ok":      "✅  Filial de ORIGEM importada com sucesso!",
+        },
+        {
+            "fase":        2,
+            "flag":        "GET_DESTINO",
+            "mapa":        "TABELAS_DESTINO",
+            "titulo":      "Importação — Filial de Destino  (2 / 2)",
+            "badge":       "▶  Fase 2 de 2  —  GET_DESTINO",
+            "label_token": "Token API — Filial de Destino:",
+            "btn_text":    "Importar Destino",
+            "msg_inicio":  "🔄  Iniciando importação da filial de DESTINO…",
+            "msg_ok":      "✅  Filial de DESTINO importada com sucesso!",
+        },
+    ]
 
     def __init__(self, root, app):
         self.root = root
@@ -466,41 +490,49 @@ class TelaPrincipal:
         self.frame = tk.Frame(root)
         self.frame.columnconfigure(0, weight=1)
         self.frame.columnconfigure(1, weight=1)
+        self._fase_idx = 0
         self._build()
 
+    # ------------------------------------------------------------------ #
+    #  Build                                                               #
+    # ------------------------------------------------------------------ #
     def _build(self):
         PAD = {"padx": 10, "pady": 6}
 
-        tk.Label(self.frame, text="Token API Filial:",
-                 anchor="center", font=("Segoe UI", 10, "bold")).grid(
-                     row=0, column=0, columnspan=2, sticky="ew", **PAD)
+        # Título dinâmico
+        self.lbl_titulo = tk.Label(
+            self.frame, text="",
+            anchor="center", font=("Segoe UI", 11, "bold"),
+        )
+        self.lbl_titulo.grid(row=0, column=0, columnspan=2, sticky="ew", **PAD)
+
+        # Badge de fase
+        self.lbl_badge = tk.Label(
+            self.frame, text="", fg="#2E8B57",
+            font=("Segoe UI", 9), anchor="center",
+        )
+        self.lbl_badge.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+
+        # Label do token (muda por fase)
+        self.lbl_token = tk.Label(
+            self.frame, text="",
+            anchor="center", font=("Segoe UI", 10, "bold"),
+        )
+        self.lbl_token.grid(row=2, column=0, columnspan=2, sticky="ew", **PAD)
+
+        # Entrada do token
         self.entry_chave = tk.Entry(self.frame, width=32, justify="center")
-        self.entry_chave.grid(row=1, column=0, columnspan=2,
+        self.entry_chave.grid(row=3, column=0, columnspan=2,
                                padx=60, pady=4, sticky="ew")
 
-        tk.Label(self.frame, text="Tipo de importação:",
-                 anchor="w", font=("Segoe UI", 9, "bold")).grid(
-                     row=2, column=0, columnspan=2, sticky="w", **PAD)
-
-        self.flag_var = tk.StringVar(value="GET_ORIGEM")
-        frame_radio = tk.Frame(self.frame)
-        frame_radio.grid(row=3, column=0, columnspan=2, padx=18, sticky="w")
-        tk.Radiobutton(
-            frame_radio,
-            text="GET_ORIGEM",
-            variable=self.flag_var, value="GET_ORIGEM",
-        ).pack(anchor="w")
-        tk.Radiobutton(
-            frame_radio,
-            text="GET_DESTINO",
-            variable=self.flag_var, value="GET_DESTINO",
-        ).pack(anchor="w")
-
+        # Barra de progresso
         self.progress = ttk.Progressbar(
             self.frame, orient="horizontal", length=320, mode="determinate",
         )
-        self.progress.grid(row=4, column=0, columnspan=2, padx=60, pady=10, sticky="ew")
+        self.progress.grid(row=4, column=0, columnspan=2,
+                           padx=60, pady=10, sticky="ew")
 
+        # Área de log
         frame_log = tk.Frame(self.frame)
         frame_log.grid(row=5, column=0, columnspan=2, padx=18, sticky="nsew")
         self.frame.rowconfigure(5, weight=1)
@@ -513,17 +545,82 @@ class TelaPrincipal:
         scroll.pack(side="right", fill="y")
         self.txt_log.config(yscrollcommand=scroll.set)
 
+        # Botões
         frame_btn = tk.Frame(self.frame)
         frame_btn.grid(row=6, column=0, columnspan=2, pady=14)
-        tk.Button(frame_btn, text="Voltar", command=self._voltar,
-                  width=12, relief="flat").pack(side="left", padx=6)
+
+        tk.Button(
+            frame_btn, text="Voltar", command=self._voltar,
+            width=12, relief="flat",
+        ).pack(side="left", padx=6)
+
         self.btn_executar = tk.Button(
-            frame_btn, text="Importar",
-            command=self._iniciar_thread, width=12,
+            frame_btn, text="",
+            command=self._iniciar_thread, width=14,
             bg="#2E8B57", fg="white", relief="flat",
         )
         self.btn_executar.pack(side="left", padx=6)
 
+        # Botão Próximo — habilitado só após fase 2
+        self.btn_proximo = tk.Button(
+            frame_btn, text="Próximo →", command=self._mostrar_titulos,
+            width=12, relief="flat",
+            bg="#cccccc", fg="#666666", state="disabled",
+        )
+        self.btn_proximo.pack(side="left", padx=6)
+
+        # Aplica textos da fase inicial
+        self._aplicar_fase()
+
+    # ------------------------------------------------------------------ #
+    #  Controle de fase                                                    #
+    # ------------------------------------------------------------------ #
+    def _aplicar_fase(self):
+        """Atualiza todos os textos e botões conforme _fase_idx."""
+        cfg = self._FASES[self._fase_idx]
+        self.lbl_titulo.config(text=cfg["titulo"])
+        self.lbl_badge.config(text=cfg["badge"])
+        self.lbl_token.config(text=cfg["label_token"])
+        self.btn_executar.config(text=cfg["btn_text"])
+        self.entry_chave.focus_set()
+
+    def _reset_form(self):
+        """Limpa entry, progresso e log — chamado entre as fases."""
+        self.entry_chave.delete(0, "end")
+        self.progress.config(value=0)
+        self.txt_log.config(state="normal")
+        self.txt_log.delete("1.0", "end")
+        self.txt_log.config(state="disabled")
+
+    def _concluir_fase(self):
+        """Decide se avança de fase ou habilita navegação (fase 2 concluída)."""
+        fase_concluida = self._fase_idx + 1
+
+        if fase_concluida < len(self._FASES):
+            # ── Fase 1 concluída → prepara fase 2 ──────────────────────
+            messagebox.showinfo(
+                "Fase 1 concluída",
+                "✅ Filial de ORIGEM importada!\n\n"
+                "Clique OK para importar a Filial de DESTINO.",
+            )
+            self._fase_idx += 1
+            self._reset_form()
+            self._aplicar_fase()
+            self.btn_executar.config(state="normal")
+        else:
+            # ── Fase 2 concluída → habilita Próximo ────────────────────
+            self.btn_proximo.config(
+                state="normal", bg="#2E8B57", fg="white", cursor="hand2",
+            )
+            messagebox.showinfo(
+                "Importação concluída",
+                "✅ Ambas as filiais foram importadas!\n\n"
+                "Clique em 'Próximo →' para continuar.",
+            )
+
+    # ------------------------------------------------------------------ #
+    #  Show / Hide / Params                                                #
+    # ------------------------------------------------------------------ #
     def show(self):
         self.frame.grid(row=0, column=0, sticky="nsew")
 
@@ -533,6 +630,9 @@ class TelaPrincipal:
     def set_conn_params(self, conn_params: dict):
         self.conn_params = conn_params
 
+    # ------------------------------------------------------------------ #
+    #  Log helper                                                          #
+    # ------------------------------------------------------------------ #
     def _log(self, msg: str):
         log.info(msg)
         self.txt_log.config(state="normal")
@@ -541,6 +641,9 @@ class TelaPrincipal:
         self.txt_log.config(state="disabled")
         self.root.update_idletasks()
 
+    # ------------------------------------------------------------------ #
+    #  Execução                                                            #
+    # ------------------------------------------------------------------ #
     def _iniciar_thread(self):
         chave = self.entry_chave.get().strip()
         if not chave:
@@ -554,8 +657,10 @@ class TelaPrincipal:
         self.txt_log.config(state="disabled")
         self.progress["value"] = 0
 
-        flag = self.flag_var.get()
-        mapa = TABELAS_ORIGEM if flag == "GET_ORIGEM" else TABELAS_DESTINO
+        cfg  = self._FASES[self._fase_idx]
+        mapa = TABELAS_ORIGEM if cfg["flag"] == "GET_ORIGEM" else TABELAS_DESTINO
+
+        self._log(cfg["msg_inicio"])
 
         threading.Thread(
             target=self._executar,
@@ -567,13 +672,14 @@ class TelaPrincipal:
         self.app.show_conexao()
 
     def _mostrar_titulos(self):
-        """Exibe a tela de títulos POST após importação bem-sucedida."""
+        """Navega para a tela de Títulos POST após as duas fases concluídas."""
         self.hide()
         self.app.show_titulos_post(self.conn_params)
 
     def _executar(self, chave: str, mapa: dict[str, str]):
-        total   = len(mapa)
-        erros   = []
+        cfg    = self._FASES[self._fase_idx]
+        total  = len(mapa)
+        erros  = []
 
         try:
             conn = psycopg2.connect(**self.conn_params)
@@ -590,10 +696,8 @@ class TelaPrincipal:
                 self._log(f"  → {len(registros)} registros recebidos da API.")
 
                 if registros:
-                    inseridos = inserir_no_banco(
-                        conn, tabela, registros,
-                        log_fn=self._log,
-                    )
+                    inseridos = inserir_no_banco(conn, tabela, registros,
+                                                 log_fn=self._log)
                     self._log(f"  ✔ {inseridos} registros inseridos em '{tabela}'.")
                 else:
                     self._log(f"  ⚠ Nenhum dado retornado para '{tabela}'.")
@@ -647,14 +751,10 @@ class TelaPrincipal:
                 f"Importação finalizada com {len(erros)} erro(s).\n"
                 "Verifique o log para detalhes.",
             ))
+            self.root.after(0, lambda: self.btn_executar.config(state="normal"))
         else:
-            self._log("✔ Processo concluído com sucesso.")
-            self.root.after(0, lambda: self._mostrar_titulos())
-            return
-
-        self.root.after(0, lambda: self.btn_executar.config(state="normal"))
-
-
+            self._log(cfg["msg_ok"])
+            self.root.after(0, self._concluir_fase)
 
 # ==========================================================
 # TELA DE TÍTULOS POST (ENVIO PARA API)
