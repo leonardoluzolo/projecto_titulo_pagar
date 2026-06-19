@@ -554,6 +554,17 @@ class TelaPrincipal:
             width=12, relief="flat",
         ).pack(side="left", padx=6)
 
+        # NOVO BOTÃO
+        tk.Button(
+            frame_btn,
+            text="↺ Recarregar",
+            command=self._recarregar,
+            width=12,
+            bg="#B8860B",
+            fg="white",
+            relief="flat",
+        ).pack(side="left", padx=6)
+
         self.btn_executar = tk.Button(
             frame_btn, text="",
             command=self._iniciar_thread, width=14,
@@ -570,6 +581,37 @@ class TelaPrincipal:
         self.btn_proximo.pack(side="left", padx=6)
 
         # Aplica textos da fase inicial
+        self._aplicar_fase()
+
+    # ------------------------------------------------------------------ #
+    #  RECARREGAR TELA 2                                                    #
+    # ------------------------------------------------------------------ #
+    def _recarregar(self):
+        """Reinicia o processo desde a fase 1."""
+        if not messagebox.askyesno(
+            "Reiniciar Processo",
+            "Deseja reiniciar todo o processo?"
+        ):
+            return
+
+        self._fase_idx = 0
+
+        self.entry_chave.delete(0, "end")
+
+        self.progress["value"] = 0
+
+        self.txt_log.config(state="normal")
+        self.txt_log.delete("1.0", "end")
+        self.txt_log.config(state="disabled")
+
+        self.btn_proximo.config(
+            state="disabled",
+            bg="#cccccc",
+            fg="#666666"
+        )
+
+        self.btn_executar.config(state="normal")
+
         self._aplicar_fase()
 
     # ------------------------------------------------------------------ #
@@ -684,7 +726,23 @@ class TelaPrincipal:
         try:
             conn = psycopg2.connect(**self.conn_params)
             self._log("✔ Conexão ao banco estabelecida.")
+
+            # Limpa as tabelas antes da importação
+            tabelas_limpar = list(mapa.values())
+            if "titulo_pagar_post" not in tabelas_limpar:
+                tabelas_limpar.append("titulo_pagar_post")
+            with conn.cursor() as cur:
+                for tabela in tabelas_limpar:
+                    self._log(f"🗑 Limpando tabela '{tabela}'...")
+                    cur.execute(
+                        f'TRUNCATE TABLE "{tabela}" RESTART IDENTITY CASCADE'
+                    )
+
+            conn.commit()
+            self._log("✔ Todas as tabelas foram limpas.")
+
         except psycopg2.OperationalError as exc:
+            
             self._log(f"✘ Falha na conexão: {_mensagem_amigavel(exc)}")
             self.root.after(0, lambda: self.btn_executar.config(state="normal"))
             return
