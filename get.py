@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 import psycopg2
 import psycopg2.extras
+from logging.handlers import RotatingFileHandler
 import requests
 
 try:
@@ -22,6 +23,54 @@ except ImportError:
 
 BASE_URL = "https://web.qualityautomacao.com.br/INTEGRACAO/"
 
+SQL_TITULO_PAGAR = """
+TRUNCATE TABLE titulo_pagar_post;
+
+INSERT INTO titulo_pagar_post (
+    fornecedorCodigo,tituloPagarCodigo, descricao,parcela,valor,dataMovimento,vencimento,
+    planoContaGerencialCodigo,centroCustoCodigo,observacao,isDataValida,numerotitulo,
+    empresaCodigo
+)
+SELECT
+    fornecedorCodigo,tituloPagarCodigo,descricao,parcela,valor,dataMovimento,vencimento,
+    planoContaGerencialCodigo,centroCustoCodigo,observacao,isDataValida,numerotitulo,
+    empresaCodigo
+FROM titulo_pagar_get;
+
+update centro_custo_dest ccd
+set centrocustocodigo_antigo = cco.centrocustocodigo
+from centro_custo_ori cco
+where trim(ccd.descricao)=trim(cco.descricao);
+
+update fornecedor_dest fd
+set fornecedorcodigo_antigo = fo.fornecedorcodigo
+from fornecedor_ori fo
+where trim(fd.cnpjcpf)=trim(fo.cnpjcpf);
+
+update plano_conta_dest pcd
+set planocontacodigo_antigo = pco.planocontacodigo
+from plano_conta_ori pco
+where trim(pcd.hierarquia)=trim(pco.hierarquia)
+and trim(pcd.descricao)=trim(pco.descricao);
+
+update titulo_pagar_post
+set isdatavalida = true;
+
+update titulo_pagar_post tpp
+set fornecedorcodigo = fd.fornecedorcodigo
+from fornecedor_dest fd
+where tpp.fornecedorcodigo = fd.fornecedorcodigo_antigo;
+
+update titulo_pagar_post tpp
+set planocontagerencialcodigo = pcd.planocontacodigo
+from plano_conta_dest pcd
+where tpp.planocontagerencialcodigo = pcd.planocontacodigo_antigo;
+
+update titulo_pagar_post tpp
+set centrocustocodigo = ccd.centrocustocodigo
+from centro_custo_dest ccd
+where tpp.centrocustocodigo = ccd.centrocustocodigo_antigo;
+"""
 # Colunas esperadas por tabela — usadas para filtrar campos da API.
 # Os nomes aqui são os "originais" retornados pela API (camelCase).
 # O código busca o nome REAL da coluna no banco via information_schema,
@@ -123,12 +172,37 @@ TABELAS_DESTINO: dict[str, str] = {
 # LOG
 # ==========================================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
-log = logging.getLogger(__name__)
+PASTA_LOG_ERROS = r"C:\Quality\LOG\erros_implantacao"
 
+os.makedirs(PASTA_LOG_ERROS, exist_ok=True)
+
+arquivo_log = os.path.join(
+    PASTA_LOG_ERROS,
+    f"implantacao_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+)
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
+formatter = logging.Formatter(
+    "%(asctime)s - %(levelname)s - %(message)s"
+)
+
+# Console
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+
+# Arquivo
+file_handler = RotatingFileHandler(
+    arquivo_log,
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=10,
+    encoding="utf-8"
+)
+file_handler.setFormatter(formatter)
+
+log.addHandler(console_handler)
+log.addHandler(file_handler)
 
 # ==========================================================
 # MAPEAMENTO DE COLUNAS (API camelCase → banco real)
@@ -256,9 +330,9 @@ class TelaConexao:
         campos = [
             ("Hostname / IP:",  "entry_host",    False),
             ("Porta:",          "entry_porta",   False),
-            ("Nome do Banco:",  "entry_banco",   False),
             ("Usuário:",        "entry_usuario", False),
             ("Senha:",          "entry_senha",   True),
+            ("Nome do Banco:",  "entry_banco",   False),
         ]
         for i, (label, attr, oculto) in enumerate(campos, start=2):
             tk.Label(self.frame, text=label, anchor="w").grid(
@@ -332,10 +406,11 @@ class TelaConexao:
             erros.append("• Hostname / IP é obrigatório.")
         if not porta.isdigit():
             erros.append("• Porta deve ser numérica (default: 5432).")
-        if not banco:
-            erros.append("• Nome do Banco é obrigatório.")
         if not usuario:
             erros.append("• Usuário é obrigatório.")
+        if not banco:
+            erros.append("• Nome do Banco é obrigatório.")
+        
 
         if erros:
             self._status("\n".join(erros), "red")
@@ -572,14 +647,6 @@ class TelaPrincipal:
         )
         self.btn_executar.pack(side="left", padx=6)
 
-        # Botão Próximo — habilitado só após fase 2
-        self.btn_proximo = tk.Button(
-            frame_btn, text="Próximo →", command=self._mostrar_titulos,
-            width=12, relief="flat",
-            bg="#cccccc", fg="#666666", state="disabled",
-        )
-        self.btn_proximo.pack(side="left", padx=6)
-
         # Aplica textos da fase inicial
         self._aplicar_fase()
 
@@ -603,12 +670,6 @@ class TelaPrincipal:
         self.txt_log.config(state="normal")
         self.txt_log.delete("1.0", "end")
         self.txt_log.config(state="disabled")
-
-        self.btn_proximo.config(
-            state="disabled",
-            bg="#cccccc",
-            fg="#666666"
-        )
 
         self.btn_executar.config(state="normal")
 
@@ -642,7 +703,7 @@ class TelaPrincipal:
             # ── Fase 1 concluída → prepara fase 2 ──────────────────────
             messagebox.showinfo(
                 "Fase 1 concluída",
-                "✅ Filial de ORIGEM importada!\n\n"
+                "✅ Filial de ORIGEM importada com sucesso!\n\n"
                 "Clique OK para importar a Filial de DESTINO.",
             )
             self._fase_idx += 1
@@ -650,14 +711,33 @@ class TelaPrincipal:
             self._aplicar_fase()
             self.btn_executar.config(state="normal")
         else:
-            # ── Fase 2 concluída → habilita Próximo ────────────────────
-            self.btn_proximo.config(
-                state="normal", bg="#2E8B57", fg="white", cursor="hand2",
+
+            self._log(
+                "🔄 Executando preparação automática dos títulos..."
             )
-            messagebox.showinfo(
-                "Importação concluída",
-                "✅ Ambas as filiais foram importadas!\n\n"
-                "Clique em 'Próximo →' para continuar.",
+
+            if not self._executar_sql_titulos():
+                self.btn_executar.config(state="normal")
+                return
+
+            self._log(
+                "✔ Preparação concluída."
+            )
+
+            self.root.after(
+                0,
+                lambda: messagebox.showinfo(
+                    "Importação concluída",
+                    "✅ Ambas as filiais foram importadas.\n\n"
+                    "A preparação dos títulos foi executada automaticamente."
+                )
+            )
+
+            self.root.after(
+                0,
+                lambda: self.app.show_titulos_post(
+                    self.app.conn_params
+                )
             )
 
     # ------------------------------------------------------------------ #
@@ -714,9 +794,10 @@ class TelaPrincipal:
         self.app.show_conexao()
 
     def _mostrar_titulos(self):
-        """Navega para a tela de Títulos POST após as duas fases concluídas."""
         self.hide()
-        self.app.show_titulos_post(self.conn_params)
+        self.app.show_titulos_post(
+            self.app.conn_params
+        )
 
     def _executar(self, chave: str, mapa: dict[str, str]):
         cfg    = self._FASES[self._fase_idx]
@@ -727,24 +808,42 @@ class TelaPrincipal:
             conn = psycopg2.connect(**self.conn_params)
             self._log("✔ Conexão ao banco estabelecida.")
 
-            # Limpa as tabelas antes da importação
-            tabelas_limpar = list(mapa.values())
-            if "titulo_pagar_post" not in tabelas_limpar:
-                tabelas_limpar.append("titulo_pagar_post")
-            with conn.cursor() as cur:
-                for tabela in tabelas_limpar:
-                    self._log(f"🗑 Limpando tabela '{tabela}'...")
-                    cur.execute(
-                        f'TRUNCATE TABLE "{tabela}" RESTART IDENTITY CASCADE'
-                    )
+            # Limpa tabelas apenas na Fase 1
+            if cfg["flag"] == "GET_ORIGEM":
 
-            conn.commit()
-            self._log("✔ Todas as tabelas foram limpas.")
+                tabelas_limpar = [
+                    "centro_custo_ori",
+                    "plano_conta_ori",
+                    "fornecedor_ori",
+                    "titulo_pagar_get",
+                    "centro_custo_dest",
+                    "plano_conta_dest",
+                    "fornecedor_dest",
+                    "titulo_pagar_post",
+                ]
 
+                with conn.cursor() as cur:
+                    for tabela in tabelas_limpar:
+                        self._log(f"🗑 Limpando tabela '{tabela}'...")
+                        cur.execute(
+                            f'TRUNCATE TABLE "{tabela}" RESTART IDENTITY CASCADE'
+                        )
+
+                conn.commit()
+                self._log("✔ Todas as tabelas foram limpas.")
         except psycopg2.OperationalError as exc:
-            
-            self._log(f"✘ Falha na conexão: {_mensagem_amigavel(exc)}")
-            self.root.after(0, lambda: self.btn_executar.config(state="normal"))
+
+            registrar_erro(
+                "Falha na conexão com PostgreSQL",
+                exc
+            )
+            self._log(
+                f"✘ Falha na conexão: {_mensagem_amigavel(exc)}"
+            )
+            self.root.after(
+                0,
+                lambda: self.btn_executar.config(state="normal")
+            )
             return
 
         for i, (endpoint, tabela) in enumerate(mapa.items(), start=1):
@@ -762,8 +861,13 @@ class TelaPrincipal:
 
             except psycopg2.errors.UndefinedTable:
                 msg = f"Tabela '{tabela}' não existe no banco."
+
                 self._log(f"  ✘ {msg}")
                 erros.append(f"{endpoint}: {msg}")
+
+                registrar_erro(
+                    f"Endpoint={endpoint} | Tabela={tabela} | {msg}"
+                )
 
             except psycopg2.Error as exc:
                 try:
@@ -771,14 +875,25 @@ class TelaPrincipal:
                 except Exception:
                     pass
                 msg = str(exc).splitlines()[0]
-                self._log(f"  ✘ Erro de banco em {endpoint}: {msg}")
+                self._log(
+                    f"  ✘ Erro de banco em {endpoint}: {msg}"
+                )
                 erros.append(f"{endpoint}: {msg}")
-                log.exception(f"Erro de banco em {endpoint}")
+                registrar_erro(
+                    f"Erro PostgreSQL | Endpoint={endpoint}",
+                    exc
+                )
 
             except requests.HTTPError as exc:
                 msg = str(exc)
-                self._log(f"  ✘ Erro HTTP em {endpoint}: {msg}")
+                self._log(
+                    f"  ✘ Erro HTTP em {endpoint}: {msg}"
+                )
                 erros.append(f"{endpoint}: {msg}")
+                registrar_erro(
+                    f"Erro HTTP | Endpoint={endpoint}",
+                    exc
+                )
 
             except Exception as exc:
                 try:
@@ -786,9 +901,14 @@ class TelaPrincipal:
                 except Exception:
                     pass
                 msg = str(exc).splitlines()[0]
-                self._log(f"  ✘ Erro em {endpoint}: {msg}")
+                self._log(
+                    f"  ✘ Erro em {endpoint}: {msg}"
+                )
                 erros.append(f"{endpoint}: {msg}")
-                log.exception(f"Erro em {endpoint}")
+                registrar_erro(
+                    f"Erro Geral | Endpoint={endpoint}",
+                    exc
+                )
 
             self.progress["value"] = (i / total) * 100
             self.root.update_idletasks()
@@ -814,6 +934,45 @@ class TelaPrincipal:
             self._log(cfg["msg_ok"])
             self.root.after(0, self._concluir_fase)
 
+
+    def _executar_sql_titulos(self):
+        """
+        Executa a preparação automática dos títulos.
+        """
+        try:
+            conn = psycopg2.connect(**self.conn_params)
+
+            with conn.cursor() as cur:
+                cur.execute(SQL_TITULO_PAGAR)
+
+            conn.commit()
+            conn.close()
+            
+            self._log(
+                "✔ Preparação dos títulos concluída."
+            )
+
+            return True
+
+        except Exception as exc:
+
+            registrar_erro(
+                "Erro ao executar SQL_TITULO_PAGAR",
+                exc
+            )
+            self._log(
+                f"✘ Erro ao executar SQL: {exc}"
+            )
+
+            self.root.after(
+                0,
+                lambda: messagebox.showerror(
+                    "Erro",
+                    f"Falha ao executar SQL:\n{exc}"
+                )
+            )
+
+            return False
 # ==========================================================
 # TELA DE TÍTULOS POST (ENVIO PARA API)
 # ==========================================================
@@ -850,7 +1009,7 @@ class TelaTitulosPost:
     def _build(self):
         PAD = {"padx": 14, "pady": 8}
 
-        tk.Label(self.frame, text="Envio de Títulos a Pagar para API",
+        tk.Label(self.frame, text="Importação de Títulos a Pagar para Retaguarda",
                  font=("Segoe UI", 12, "bold")).grid(
                      row=0, column=0, sticky="w", **PAD)
 
@@ -1027,6 +1186,10 @@ class TelaTitulosPost:
                     sucesso += 1
 
                 except requests.exceptions.RequestException as exc:
+                    registrar_erro(
+                        f"Erro ao enviar título {titulo.get('numerotitulo')}",
+                        exc
+                    )
                     titulo["status"] = f"✘ Erro"
                     msg_erro = str(exc)
                     erros_list.append({
@@ -1394,7 +1557,15 @@ def _preparar_valor(valor, coluna: str):
 
     return valor
 
-
+def registrar_erro(mensagem: str, excecao: Exception = None):
+    """
+    Salva erro no arquivo de log.
+    """
+    if excecao:
+        log.exception(f"{mensagem}: {excecao}")
+    else:
+        log.error(mensagem)
+        
 # ==========================================================
 # UTILITÁRIOS
 # ==========================================================
