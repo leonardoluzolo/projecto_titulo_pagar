@@ -1026,10 +1026,11 @@ class TelaTitulosPost:
         frame_token.grid(row=1, column=0, sticky="ew", padx=14, pady=8)
         frame_token.columnconfigure(1, weight=1)
 
-        tk.Label(frame_token, text="Token API de Destino:", anchor="w").grid(
+        tk.Label(frame_token, text="Nome da Filial de Destino:", anchor="w").grid(
             row=0, column=0, sticky="w", padx=(0, 10))
         self.entry_token = tk.Entry(frame_token, width=40)
         self.entry_token.grid(row=0, column=1, sticky="ew")
+        self.entry_token.config(state="readonly")
 
         # Frame para a tabela de títulos
         frame_table = tk.Frame(self.frame)
@@ -1085,11 +1086,28 @@ class TelaTitulosPost:
         self.conn_params = conn_params
         self.titulos = []
 
-        # Pré-preenche o token do destino salvo na fase 2, se disponível
+        # Pré-preenche o nome fantasia da filial de destino
         token_salvo = getattr(self.app, "token_destino", "")
+        nome_filial = ""
         if token_salvo:
+            try:
+                url = f"{BASE_URL}EMPRESAS?chave={token_salvo}"
+                resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
+                dados = resp.json()
+                resultados = dados.get("resultados", [])
+                if resultados:
+                    nome_filial = resultados[0].get("fantasia", "Filial Desconhecida")
+                else:
+                    nome_filial = "Filial Não Encontrada"
+            except Exception as e:
+                log.error(f"Erro ao buscar nome da filial: {e}")
+                nome_filial = "Erro ao buscar nome da filial"
+
+            self.entry_token.config(state="normal")
             self.entry_token.delete(0, tk.END)
-            self.entry_token.insert(0, token_salvo)
+            self.entry_token.insert(0, nome_filial)
+            self.entry_token.config(state="readonly")
 
         # Limpa a tabela
         for item in self.tree.get_children():
@@ -1162,10 +1180,10 @@ class TelaTitulosPost:
 
     def _iniciar_importacao(self):
         """Inicia o processo de importação em thread."""
-        token = self.entry_token.get().strip()
+        token = getattr(self.app, "token_destino", "").strip()
         if not token:
-            messagebox.showwarning("Campo obrigatório",
-                                   "Informe o Token da API de Destino.")
+            messagebox.showwarning("Erro",
+                                   "Token da API de Destino não encontrado internamente. Volte e tente novamente.")
             return
 
         if not self.titulos:
