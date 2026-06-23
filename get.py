@@ -214,7 +214,7 @@ log.addHandler(file_handler)
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Integração API → PostgreSQL")
+        self.root.title("Migrador de Títulos a Pagar - webPosto")
         self.root.resizable(True, True)
         self.root.minsize(520, 420)
         self._centralizar(520, 420)
@@ -404,7 +404,8 @@ class TelaConexao:
                   bg="#0078D7", fg="white", relief="flat")
         btn_cancelar = tk.Button(frame_btn, text="Sair",
                   command=self.root.quit, width=16,
-                  relief="flat")
+                  bg="#C62828", fg="white", relief="flat")
+                 
 
         btn_testar.pack(side="left", padx=6)
         btn_conectar.pack(side="left", padx=6)
@@ -663,7 +664,7 @@ class TelaPrincipal:
 
         tk.Button(
             frame_btn, text="Voltar", command=self._voltar,
-            width=12, relief="flat",
+            width=12, bg="#C62828", fg="white", relief="flat",
         ).pack(side="left", padx=6)
 
         # NOVO BOTÃO
@@ -1147,7 +1148,7 @@ class TelaTitulosPost:
         frame_btn = tk.Frame(self.frame)
         frame_btn.grid(row=4, column=0, pady=14)
         tk.Button(frame_btn, text="Voltar", command=self._voltar,
-                  width=14, relief="flat").pack(side="left", padx=6)
+                  width=14, bg="#C62828", fg="white", relief="flat").pack(side="left", padx=6)
         tk.Button(frame_btn, text="↺ Recarregar", command=self._recarregar,
                   width=14, bg="#B8860B", fg="white", relief="flat").pack(side="left", padx=6)
         self.btn_importar = tk.Button(frame_btn, text="Importar",
