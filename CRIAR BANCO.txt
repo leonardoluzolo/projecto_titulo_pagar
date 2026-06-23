@@ -1,0 +1,219 @@
+-- ==========================================================
+-- CENTRO DE CUSTO ORIGEM
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS centro_custo_ori (
+    centroCustoCodigo BIGINT PRIMARY KEY,
+    codigo VARCHAR(50),
+    descricao VARCHAR(255),
+    centroCustoCodigoExterno VARCHAR(100),
+    tipoCentroCusto VARCHAR(100)
+);
+
+-- ==========================================================
+-- CENTRO DE CUSTO DESTINO
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS centro_custo_dest (
+    centroCustoCodigo BIGINT PRIMARY KEY,
+    centrocustocodigo_antigo VARCHAR(50),
+    descricao VARCHAR(255),
+    centroCustoCodigoExterno VARCHAR(100),
+    tipoCentroCusto VARCHAR(100),
+
+);
+
+-- ==========================================================
+-- PLANO DE CONTA ORIGEM
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS plano_conta_ori (
+    planoContaCodigo BIGINT PRIMARY KEY,
+    codigo VARCHAR(50),
+    descricao VARCHAR(255),
+    hierarquia VARCHAR(255),
+    apuraDre BOOLEAN,
+    natureza VARCHAR(50),
+    tipo VARCHAR(50)
+);
+
+-- ==========================================================
+-- PLANO DE CONTA DESTINO
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS plano_conta_dest (
+    planoContaCodigo BIGINT PRIMARY KEY,
+    planocontacodigo_antigo VARCHAR(50),
+    descricao VARCHAR(255),
+    hierarquia VARCHAR(255),
+    apuraDre BOOLEAN,
+    natureza VARCHAR(50),
+    tipo VARCHAR(50),
+);
+
+-- ==========================================================
+-- FORNECEDOR ORIGEM
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS fornecedor_ori (
+    fornecedorCodigo BIGINT PRIMARY KEY,
+    codigo VARCHAR(50),
+    fornecedorReferencia VARCHAR(100),
+    razao VARCHAR(255),
+    fantasia VARCHAR(255),
+    cnpjCpf VARCHAR(30),
+    tipoPessoa VARCHAR(20),
+    fornecedorCodigoExterno VARCHAR(100)
+);
+
+-- ==========================================================
+-- FORNECEDOR DESTINO
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS fornecedor_dest (
+    fornecedorCodigo BIGINT PRIMARY KEY,
+    fornecedorcodigo_antigo VARCHAR(50),
+    fornecedorReferencia VARCHAR(100),
+    razao VARCHAR(255),
+    fantasia VARCHAR(255),
+    cnpjCpf VARCHAR(30),
+    tipoPessoa VARCHAR(20),
+    fornecedorCodigoExterno VARCHAR(100),
+);
+
+-- ==========================================================
+-- TITULO PAGAR GET
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS titulo_pagar_get (
+
+    fornecedorCodigo BIGINT,
+    tituloPagarCodigo BIGINT,
+
+    descricao TEXT,
+    parcela INTEGER,
+
+    dataMovimento DATE,
+    vencimento DATE,
+
+    planoContaGerencialCodigo BIGINT,
+    centroCustoCodigo BIGINT,
+
+    observacao TEXT,
+    isDataValida BOOLEAN,
+
+    empresaCodigo BIGINT,
+
+    notaEntradaCodigo BIGINT,
+    dataPagamento DATE,
+
+    situacao VARCHAR(50),
+    tipo VARCHAR(50),
+    tipoLancamento VARCHAR(50),
+
+    valor NUMERIC(15,2),
+    valorPago NUMERIC(15,2),
+    desconto NUMERIC(15,2),
+    acrescimo NUMERIC(15,2),
+
+    cheque NUMERIC(15,2),
+    dinheiro NUMERIC(15,2),
+    troco NUMERIC(15,2),
+    adiantamento NUMERIC(15,2),
+    cartao NUMERIC(15,2),
+
+    fornecedorIntermediadorCodigo BIGINT,
+
+    numeroTitulo VARCHAR(100),
+
+    nomeFornecedor VARCHAR(255),
+    cpfCnpjFornecedor VARCHAR(30),
+
+    pagamento JSONB,
+
+    numeroRemessa VARCHAR(100),
+
+    planoContaGerencialNivel VARCHAR(100),
+    planoContaGerencialDescricao VARCHAR(255),
+
+    centroCustoDescricao VARCHAR(255),
+
+    quantidadeParcelas INTEGER,
+
+    linhaDigitavel TEXT,
+
+    autorizado BOOLEAN,
+
+    nossoNumero VARCHAR(100),
+
+    bancoFornecedor VARCHAR(100),
+    agenciaFornecedor VARCHAR(100),
+    contaFornecedor VARCHAR(100),
+
+    tipoChavePixFornecedor VARCHAR(50),
+    chavePixFornecedor VARCHAR(255),
+
+    qrCodePix TEXT,
+
+    tipoTributo VARCHAR(100),
+    codigoReceitaTributo VARCHAR(100),
+
+    renavam VARCHAR(30),
+    placa VARCHAR(20),
+
+    codigoMunicipio VARCHAR(30),
+
+    digitoFgts VARCHAR(20),
+    lacreConSocialFgts VARCHAR(50),
+    identificadorFgts VARCHAR(100),
+
+    codigo BIGINT
+);
+
+-- ==========================================================
+-- TITULO PAGAR POST
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS titulo_pagar_post (
+
+    tituloPagarCodigo BIGINT PRIMARY KEY,
+    fornecedorCodigo BIGINT,
+    numeroTitulo VARCHAR(100),
+
+    descricao TEXT,
+    parcela INTEGER,
+
+    valor NUMERIC(15,2),
+
+    dataMovimento DATE,
+    vencimento DATE,
+
+    planoContaGerencialCodigo BIGINT,
+    centroCustoCodigo BIGINT,
+    isDataValida BOOLEAN,
+    observacao TEXT,
+
+    empresaCodigo BIGINT
+);
+
+-- ==========================================================
+-- ÍNDICES
+-- ==========================================================
+
+CREATE INDEX IF NOT EXISTS idx_fornecedor_dest_cnpj
+ON fornecedor_dest(cnpjCpf);
+
+CREATE INDEX IF NOT EXISTS idx_fornecedor_ori_cnpj
+ON fornecedor_ori(cnpjCpf);
+
+CREATE INDEX IF NOT EXISTS idx_plano_conta_dest_hierarquia
+ON plano_conta_dest(hierarquia);
+
+CREATE INDEX IF NOT EXISTS idx_plano_conta_ori_hierarquia
+ON plano_conta_ori(hierarquia);
+
+CREATE INDEX IF NOT EXISTS idx_centro_custo_dest_descricao
+ON centro_custo_dest(descricao);
+
+CREATE INDEX IF NOT EXISTS idx_centro_custo_ori_descricao
+ON centro_custo_ori(descricao);
