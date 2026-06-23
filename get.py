@@ -180,7 +180,7 @@ os.makedirs(PASTA_LOG_ERROS, exist_ok=True)
 
 arquivo_log = os.path.join(
     PASTA_LOG_ERROS,
-    f"implantacao_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    f"implantacao_{datetime.now().strftime('%Y%m%d')}.log"
 )
 
 log = logging.getLogger(__name__)
@@ -833,7 +833,19 @@ class TelaPrincipal:
         ).start()
 
     def _voltar(self):
-        self.app.show_conexao()
+        if self._fase_idx > 0:
+            # Volta da Fase 2 para a Fase 1
+            self._fase_idx -= 1
+            self._reset_form()
+            self._aplicar_fase()
+            self.btn_executar.config(state="normal")
+            # Limpa token de destino em memória
+            if hasattr(self.app, "token_destino"):
+                self.app.token_destino = ""
+        else:
+            # Volta da Fase 1 para a Conexão
+            self._reset_form()
+            self.app.show_conexao()
 
     def _mostrar_titulos(self):
         self.hide()
@@ -845,6 +857,7 @@ class TelaPrincipal:
         cfg    = self._FASES[self._fase_idx]
         total  = len(mapa)
         erros  = []
+        erros_detalhados = {}
 
         try:
             conn = psycopg2.connect(**self.conn_params)
@@ -898,13 +911,23 @@ class TelaPrincipal:
                 self._log("✔ Todas as tabelas foram limpas.")
         except psycopg2.OperationalError as exc:
 
-            registrar_erro(
+            caminho_log = registrar_erro(
                 "Falha na conexão com PostgreSQL",
                 exc
             )
             self._log(
                 f"✘ Falha na conexão: {_mensagem_amigavel(exc)}"
             )
+            
+            msg = f"Falha na conexão:\n{_mensagem_amigavel(exc)}"
+            if caminho_log:
+                msg += f"\n\nArquivo de erro gerado:\n{caminho_log}\n\n"
+                
+            self.root.after(
+                0,
+                lambda m=msg: messagebox.showerror("Erro de Conexão", m)
+            )
+            
             self.root.after(
                 0,
                 lambda: self.btn_executar.config(state="normal")
@@ -929,10 +952,7 @@ class TelaPrincipal:
 
                 self._log(f"  ✘ {msg}")
                 erros.append(f"{endpoint}: {msg}")
-
-                registrar_erro(
-                    f"Endpoint={endpoint} | Tabela={tabela} | {msg}"
-                )
+                erros_detalhados[endpoint] = ("UndefinedTable", None)
 
             except psycopg2.Error as exc:
                 try:
@@ -944,10 +964,7 @@ class TelaPrincipal:
                     f"  ✘ Erro de banco em {endpoint}: {msg}"
                 )
                 erros.append(f"{endpoint}: {msg}")
-                registrar_erro(
-                    f"Erro PostgreSQL | Endpoint={endpoint}",
-                    exc
-                )
+                erros_detalhados[endpoint] = ("Erro PostgreSQL", exc)
 
             except requests.HTTPError as exc:
                 msg = str(exc)
@@ -955,10 +972,7 @@ class TelaPrincipal:
                     f"  ✘ Erro HTTP em {endpoint}: {msg}"
                 )
                 erros.append(f"{endpoint}: {msg}")
-                registrar_erro(
-                    f"Erro HTTP | Endpoint={endpoint}",
-                    exc
-                )
+                erros_detalhados[endpoint] = ("Erro HTTP", exc)
 
             except Exception as exc:
                 try:
@@ -970,10 +984,7 @@ class TelaPrincipal:
                     f"  ✘ Erro em {endpoint}: {msg}"
                 )
                 erros.append(f"{endpoint}: {msg}")
-                registrar_erro(
-                    f"Erro Geral | Endpoint={endpoint}",
-                    exc
-                )
+                erros_detalhados[endpoint] = ("Erro Geral", exc)
 
             self.progress["value"] = (i / total) * 100
             self.root.update_idletasks()
@@ -989,10 +1000,24 @@ class TelaPrincipal:
             self._log(f"⚠ Concluído com {len(erros)} erro(s):")
             for e in erros:
                 self._log(f"  • {e}")
+                
+            # Gerar um único arquivo consolidado
+            caminho_log = registrar_erro(
+                "Múltiplos erros durante a importação em lote",
+                None,
+                **{ep: f"[{tipo}] {str(exc) if exc else ''}" for ep, (tipo, exc) in erros_detalhados.items()}
+            )
+            
+            msg_final = f"Importação finalizada com {len(erros)} erro(s).\n"
+            if caminho_log:
+                msg_final += f"\nArquivo de erro gerado:\n{caminho_log}\n"
+                msg_final += "\nVerifique o log para detalhes."
+            else:
+                msg_final += "\nVerifique o log para detalhes."
+                
             self.root.after(0, lambda: messagebox.showwarning(
                 "Concluído com erros",
-                f"Importação finalizada com {len(erros)} erro(s).\n"
-                "Verifique o log para detalhes.",
+                msg_final
             ))
             self.root.after(0, lambda: self.btn_executar.config(state="normal"))
         else:
@@ -1021,7 +1046,7 @@ class TelaPrincipal:
 
         except Exception as exc:
 
-            registrar_erro(
+            caminho_log = registrar_erro(
                 "Erro ao executar SQL_TITULO_PAGAR",
                 exc
             )
@@ -1029,12 +1054,13 @@ class TelaPrincipal:
                 f"✘ Erro ao executar SQL: {exc}"
             )
 
+            msg = f"Falha ao executar SQL:\n{exc}"
+            if caminho_log:
+                msg += f"\n\nArquivo de erro gerado:\n{caminho_log}\n\n"
+
             self.root.after(
                 0,
-                lambda: messagebox.showerror(
-                    "Erro",
-                    f"Falha ao executar SQL:\n{exc}"
-                )
+                lambda m=msg: messagebox.showerror("Erro", m)
             )
 
             return False
@@ -1221,7 +1247,23 @@ class TelaTitulosPost:
             self.titulos = []
 
     def _voltar(self):
-        """Volta para a tela principal."""
+        """Limpa as informações temporárias e volta para a tela anterior."""
+        # Limpa tabela e registros em memória
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.titulos = []
+        
+        # Limpa mensagens
+        self.lbl_info.config(text="")
+        
+        # Limpa campo visual
+        self.entry_token.config(state="normal")
+        self.entry_token.delete(0, tk.END)
+        self.entry_token.config(state="readonly")
+        
+        # Restaura botão caso estivesse desabilitado
+        self.btn_importar.config(state="normal")
+
         self.hide()
         self.app.tela_principal.show()
 
@@ -1294,9 +1336,12 @@ class TelaTitulosPost:
                 self.root.after(0, lambda idx=i: self._atualizar_linha(idx))
 
         except Exception as exc:
-            self.root.after(0, lambda: messagebox.showerror(
-                "Erro", f"Erro geral na importação:\n{exc}"
-            ))
+            caminho_log = registrar_erro("Erro geral na importação", exc)
+            msg = f"Erro geral na importação:\n{exc}"
+            if caminho_log:
+                msg += f"\n\nArquivo de erro gerado:\n{caminho_log}\n\n"
+                
+            self.root.after(0, lambda m=msg: messagebox.showerror("Erro", m))
             self.btn_importar.config(state="normal")
             return
 
@@ -1701,8 +1746,11 @@ def registrar_erro(mensagem: str, excecao: Exception = None, **kwargs):
         with open(caminho_arquivo, "w", encoding="utf-8") as f:
             f.write("\n".join(linhas_erro))
             
+        return caminho_arquivo
+            
     except Exception as e:
         log.error(f"Falha ao gerar arquivo de erro detalhado: {e}")
+        return None
 # ==========================================================
 # UTILITÁRIOS
 # ==========================================================
