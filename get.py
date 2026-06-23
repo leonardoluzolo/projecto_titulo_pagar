@@ -9,6 +9,8 @@ import psycopg2
 import psycopg2.extras
 from logging.handlers import RotatingFileHandler
 import requests
+import traceback
+import inspect
 
 try:
     from openpyxl import Workbook
@@ -260,6 +262,38 @@ class App:
 # ==========================================================
 # MAPEAMENTO DE COLUNAS (API camelCase → banco real)
 # ==========================================================
+
+def validar_estrutura_banco(conn) -> list[str]:
+    """
+    Verifica se todas as tabelas e colunas mapeadas (incluindo aliases)
+    estão presentes no banco. Retorna uma lista de strings com os erros.
+    """
+    erros = []
+    tabelas_esperadas = list(COLUNAS_ESPERADAS.keys())
+    
+    with conn.cursor() as cur:
+        for tabela in tabelas_esperadas:
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = %s
+                )
+            """, (tabela,))
+            if not cur.fetchone()[0]:
+                erros.append(f"Tabela ausente: {tabela}")
+                continue
+                
+            colunas_reais = obter_colunas_reais(conn, tabela)
+            colunas_api = COLUNAS_ESPERADAS[tabela]
+            aliases = ALIAS_COLUNAS.get(tabela, {})
+            
+            for col_api in colunas_api:
+                col_banco_esperada = aliases.get(col_api, col_api)
+                if col_banco_esperada.lower() not in colunas_reais:
+                    erros.append(f"{col_banco_esperada} (em {tabela})")
+                    
+    return erros
+
 
 def obter_colunas_reais(conn, tabela: str) -> dict[str, str]:
     """
@@ -815,6 +849,29 @@ class TelaPrincipal:
         try:
             conn = psycopg2.connect(**self.conn_params)
             self._log("✔ Conexão ao banco estabelecida.")
+
+            # Validação da estrutura do banco (Apenas Fase 1)
+            if cfg["flag"] == "GET_ORIGEM":
+                self._log("🔍 Validando estrutura do banco de dados...")
+                erros_bd = validar_estrutura_banco(conn)
+                if erros_bd:
+                    self._log("✘ Estrutura do banco incompatível ou incompleta.")
+                    msg = "Foram identificadas colunas ou tabelas obrigatórias inexistentes na base selecionada:\n\n"
+                    for err in erros_bd[:10]: # Mostra os primeiros 10 para não estourar a tela
+                        msg += f"• {err}\n"
+                    if len(erros_bd) > 10:
+                        msg += f"... e mais {len(erros_bd) - 10} item(ns).\n"
+                    
+                    msg += "\nVerifique se o banco informado é o correto e retorne à tela de conexão para realizar uma nova conexão antes de prosseguir com a importação."
+                    
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Erro ao validar a estrutura do banco de dados.",
+                        msg
+                    ))
+                    self.root.after(0, lambda: self.btn_executar.config(state="normal"))
+                    conn.close()
+                    return
+                self._log("✔ Estrutura validada com sucesso.")
 
             # Limpa tabelas apenas na Fase 1
             if cfg["flag"] == "GET_ORIGEM":
@@ -1592,15 +1649,60 @@ def _preparar_valor(valor, coluna: str):
 
     return valor
 
-def registrar_erro(mensagem: str, excecao: Exception = None):
+def registrar_erro(mensagem: str, excecao: Exception = None, **kwargs):
     """
-    Salva erro no arquivo de log.
+    Salva erro no arquivo de log e gera um arquivo txt detalhado individual.
     """
     if excecao:
         log.exception(f"{mensagem}: {excecao}")
     else:
         log.error(mensagem)
         
+    try:
+        agora = datetime.now()
+        timestamp = agora.strftime("%Y%m%d_%H%M%S")
+        nome_arquivo = f"erro_titulopagar_{timestamp}.txt"
+        caminho_arquivo = os.path.join(PASTA_LOG_ERROS, nome_arquivo)
+        
+        # Tenta descobrir o módulo/função que chamou
+        caller_frame = inspect.stack()[1]
+        modulo = os.path.basename(caller_frame.filename)
+        operacao = caller_frame.function
+        
+        versao_app = "1.0.0"
+        
+        linhas_erro = []
+        linhas_erro.append("=" * 60)
+        linhas_erro.append(" RELATÓRIO DE ERRO - TÍTULOS A PAGAR")
+        linhas_erro.append("=" * 60)
+        linhas_erro.append(f"Data e Hora      : {agora.strftime('%d/%m/%Y %H:%M:%S')}")
+        linhas_erro.append(f"Versão Aplicação : {versao_app}")
+        linhas_erro.append(f"Módulo/Tela      : {modulo}")
+        linhas_erro.append(f"Operação         : {operacao}")
+        linhas_erro.append(f"Contexto/Msg     : {mensagem}")
+        
+        if kwargs:
+            linhas_erro.append("-" * 60)
+            linhas_erro.append(" DADOS ADICIONAIS:")
+            for k, v in kwargs.items():
+                linhas_erro.append(f"  {k}: {v}")
+                
+        linhas_erro.append("-" * 60)
+        if excecao:
+            linhas_erro.append(f"Exceção: {type(excecao).__name__} - {str(excecao)}")
+            linhas_erro.append("Stack Trace:")
+            linhas_erro.append("".join(traceback.format_exception(type(excecao), excecao, excecao.__traceback__)))
+        else:
+            linhas_erro.append("Stack Trace da Chamada (Sem exceção explícita):")
+            linhas_erro.append("".join(traceback.format_stack()[:-1]))
+            
+        linhas_erro.append("=" * 60)
+        
+        with open(caminho_arquivo, "w", encoding="utf-8") as f:
+            f.write("\n".join(linhas_erro))
+            
+    except Exception as e:
+        log.error(f"Falha ao gerar arquivo de erro detalhado: {e}")
 # ==========================================================
 # UTILITÁRIOS
 # ==========================================================
