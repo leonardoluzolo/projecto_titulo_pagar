@@ -220,6 +220,7 @@ class App:
         self.root.rowconfigure(0, weight=1)
 
         self.conn_params: dict | None = None
+        self.token_destino: str = ""          # token da filial de destino (fase 2)
         self.tela_conexao = TelaConexao(self.root, self)
         self.tela_principal = TelaPrincipal(self.root, self)
         self.tela_titulos_post: TelaTitulosPost | None = None
@@ -242,8 +243,10 @@ class App:
         self.tela_conexao.hide()
         self.tela_principal.show()
 
-    def show_titulos_post(self, conn_params: dict):
+    def show_titulos_post(self, conn_params: dict, token_destino: str = ""):
         """Exibe a tela de títulos POST para envio à API."""
+        if token_destino:
+            self.token_destino = token_destino
         if self.tela_titulos_post is None:
             self.tela_titulos_post = TelaTitulosPost(self.root, self)
         self.tela_principal.hide()
@@ -728,15 +731,16 @@ class TelaPrincipal:
                 0,
                 lambda: messagebox.showinfo(
                     "Importação concluída",
-                    "✅ Ambas as filiais foram importadas.\n\n"
-                    "A preparação dos títulos foi executada automaticamente."
+                    "✅ Informações adicionadas no banco de dados com sucesso.\n\n"
+                    "Pressione OK para visualizar os títulos."
                 )
             )
 
             self.root.after(
                 0,
                 lambda: self.app.show_titulos_post(
-                    self.app.conn_params
+                    self.app.conn_params,
+                    token_destino=self.app.token_destino,
                 )
             )
 
@@ -781,6 +785,10 @@ class TelaPrincipal:
 
         cfg  = self._FASES[self._fase_idx]
         mapa = TABELAS_ORIGEM if cfg["flag"] == "GET_ORIGEM" else TABELAS_DESTINO
+
+        # Salva o token do destino (fase 2) para reutilização na tela de Títulos
+        if cfg["flag"] == "GET_DESTINO":
+            self.app.token_destino = chave
 
         self._log(cfg["msg_inicio"])
 
@@ -1070,9 +1078,18 @@ class TelaTitulosPost:
         self.frame.grid_remove()
 
     def carregar_titulos(self, conn_params: dict):
-        """Carrega os títulos da tabela titulo_pagar_post com todos os campos."""
+        """Carrega os títulos da tabela titulo_pagar_post com todos os campos.
+
+        Pré-preenche o campo de token se o token do destino já estiver salvo no App.
+        """
         self.conn_params = conn_params
         self.titulos = []
+
+        # Pré-preenche o token do destino salvo na fase 2, se disponível
+        token_salvo = getattr(self.app, "token_destino", "")
+        if token_salvo:
+            self.entry_token.delete(0, tk.END)
+            self.entry_token.insert(0, token_salvo)
 
         # Limpa a tabela
         for item in self.tree.get_children():
