@@ -26,7 +26,7 @@ except ImportError:
 BASE_URL = "https://web.qualityautomacao.com.br/INTEGRACAO/"
 
 SQL_TITULO_PAGAR = """
-TRUNCATE TABLE titulo_pagar_post;
+DELETE FROM titulo_pagar_post;
 
 INSERT INTO titulo_pagar_post (
     fornecedorCodigo,tituloPagarCodigo, descricao,parcela,valor,dataMovimento,vencimento,
@@ -385,6 +385,7 @@ class TelaConexao:
 
         self.entry_porta.bind("<FocusOut>", self._on_porta_change)
         self.entry_porta.bind("<Return>", self._on_porta_change)
+        self.entry_senha.bind("<Return>", self._on_senha_enter)
 
         self.lbl_status = tk.Label(
             self.frame, text="", fg="gray", anchor="w",
@@ -462,7 +463,12 @@ class TelaConexao:
             return
         self._listar_bancos_disponiveis()
 
-    def _listar_bancos_disponiveis(self):
+    def _on_senha_enter(self, event=None):
+        if not self.entry_host.get().strip() or not self.entry_porta.get().strip() or not self.entry_usuario.get().strip():
+            return
+        self._listar_bancos_disponiveis(from_senha=True)
+
+    def _listar_bancos_disponiveis(self, from_senha: bool = False):
         host = self.entry_host.get().strip()
         porta = self.entry_porta.get().strip()
         usuario = self.entry_usuario.get().strip()
@@ -471,7 +477,8 @@ class TelaConexao:
         if not porta.isdigit():
             return
 
-        self._status("Consultando bancos disponíveis…", "gray")
+        if not from_senha:
+            self._status("Consultando bancos disponíveis…", "gray")
         try:
             conn = psycopg2.connect(
                 host=host,
@@ -494,10 +501,14 @@ class TelaConexao:
                 self._status(f"✔ Bancos carregados: {len(bancos)} disponíveis.", "green")
             else:
                 self._status("✔ Conexão OK, mas nenhum banco disponível encontrado.", "orange")
-        except psycopg2.OperationalError as exc:
-            self._status(f"✘ Falha ao listar bancos: {_mensagem_amigavel(exc)}", "red")
-        except Exception as exc:
-            self._status(f"✘ Erro ao listar bancos: {exc}", "red")
+        except Exception:
+            # Se vier do campo de senha: limpa o combobox silenciosamente
+            if from_senha:
+                self.entry_banco["values"] = []
+                self.entry_banco.set("")
+                self._status("", "gray")
+            else:
+                self._status("✘ Não foi possível listar os bancos.", "red")
 
     def _status(self, msg, cor="gray"):
         self.lbl_status.config(text=msg, fg=cor)
@@ -891,21 +902,21 @@ class TelaPrincipal:
             if cfg["flag"] == "GET_ORIGEM":
 
                 tabelas_limpar = [
+                    "titulo_pagar_get",
+                    "titulo_pagar_post",
                     "centro_custo_ori",
                     "plano_conta_ori",
                     "fornecedor_ori",
-                    "titulo_pagar_get",
                     "centro_custo_dest",
                     "plano_conta_dest",
                     "fornecedor_dest",
-                    "titulo_pagar_post",
                 ]
 
                 with conn.cursor() as cur:
                     for tabela in tabelas_limpar:
                         self._log(f"🗑 Limpando tabela '{tabela}'...")
                         cur.execute(
-                            f'TRUNCATE TABLE "{tabela}" RESTART IDENTITY CASCADE'
+                            f'DELETE FROM "{tabela}"'
                         )
 
                 conn.commit()
@@ -927,6 +938,28 @@ class TelaPrincipal:
             self.root.after(
                 0,
                 lambda m=msg: messagebox.showerror("Erro de Conexão", m)
+            )
+            
+            self.root.after(
+                0,
+                lambda: self.btn_executar.config(state="normal")
+            )
+            return
+            
+        except Exception as exc:
+            caminho_log = registrar_erro(
+                "Erro durante a inicialização/limpeza do banco",
+                exc
+            )
+            self._log(f"✘ Erro de inicialização: {exc}")
+            
+            msg = f"Ocorreu um erro ao preparar o banco de dados:\n{exc}"
+            if caminho_log:
+                msg += f"\n\nArquivo de erro gerado:\n{caminho_log}\n\n"
+                
+            self.root.after(
+                0,
+                lambda m=msg: messagebox.showerror("Erro na Inicialização", m)
             )
             
             self.root.after(
