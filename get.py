@@ -24,6 +24,7 @@ except ImportError:
 # ==========================================================
 
 BASE_URL = "https://web.qualityautomacao.com.br/INTEGRACAO/"
+VERSAO_APP = "1.8.0"
 
 SQL_TITULO_PAGAR = """
 DELETE FROM titulo_pagar_post;
@@ -411,6 +412,13 @@ class TelaConexao:
         btn_testar.pack(side="left", padx=6)
         btn_conectar.pack(side="left", padx=6)
         btn_cancelar.pack(side="left", padx=6)
+
+        tk.Label(
+            self.frame,
+            text=f"Versão {VERSAO_APP}",
+            fg="#999999",
+            font=("Segoe UI", 8),
+        ).grid(row=10, column=0, columnspan=2, pady=(0, 10))
 
         self._aplicar_defaults_local()
 
@@ -1748,7 +1756,7 @@ def registrar_erro(mensagem: str, excecao: Exception = None, **kwargs):
         modulo = os.path.basename(caller_frame.filename)
         operacao = caller_frame.function
         
-        versao_app = "1.0.0"
+        versao_app = VERSAO_APP
         
         linhas_erro = []
         linhas_erro.append("=" * 60)
